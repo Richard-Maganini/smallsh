@@ -4,10 +4,12 @@
 #include <unistd.h>
 #include <sys/types.h>
 
+// LL node struct for holding a list of command arguments
 struct arg {
 	char* name;
 	struct arg* next;
 };
+// struct for holding information from parsed input commands 
 struct command {
 	char* name;
 	struct arg* args;

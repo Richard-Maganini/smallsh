@@ -5,10 +5,12 @@
 #include <sys/types.h>
 #define MAX_CHARS 2049
 
+// struct for holding information from parsed input commands 
 struct arg {
 	char* name;
 	struct arg* next;
 };
+// struct for holding information from parsed input commands 
 struct command {
 	char* name;
 	struct arg* args;
@@ -17,6 +19,7 @@ struct command {
 	char* outputFile;
 };
 
+// prints the prompt, reads in and validates a string, then copies it to the heap if valid. Returns heap pointer if valid else NULL.
 char* getCommand(void) {
 	char input[MAX_CHARS];
 	char* command;
@@ -26,7 +29,7 @@ char* getCommand(void) {
 	if (strlen(input) > MAX_CHARS) {
 		printf("Invalid command -- exceeded 2048 characters");
 		fflush(stdout);
-		command = "";
+		command = NULL;
 	}
 	else {
 		command = malloc(sizeof(input));
@@ -35,10 +38,12 @@ char* getCommand(void) {
 	return command;
 }
 
+// performs expansion of $$ characters in the command string (passed in as token) and returns the expansion
 char* expandDollars(char* token) {
 	int expansions = 0;
 	int token_length = strlen(token);
 	int i = 0;
+	// count the number of expansions that need to be performed
 	while (i < token_length) {
 		if (token[i] == '$') {
 			if (i != token_length - 1) {
@@ -50,19 +55,20 @@ char* expandDollars(char* token) {
 		}
 		i++;
 	}
-	if (expansions > 0) {
-		int pid = getpid();
+	if (expansions > 0) { // if we need to do expansion
+		int pid = getpid();  // get pid we will replace $$ with
 		char pid_str[20];
-		memset(pid_str, '\0', 20);
-		sprintf(pid_str, "%d", pid);
-		int pid_digits = strlen(pid_str);
-		int new_length = token_length + 1 + (expansions * pid_digits);
-		char newToken[new_length];
-		memset(newToken, '\0', new_length);
+		memset(pid_str, '\0', 20);   // zero buffer that will hold stringified pid so we get correct number of pid digits below
+		sprintf(pid_str, "%d", pid);  // fill pid_str buffer with stringifed pid
+		int pid_digits = strlen(pid_str);  // get number of digits in pid
+		int new_length = token_length + 1 + (expansions * pid_digits);   // calculate number of characters needed to expand command string 
+		char newToken[new_length];  // initialize newToken buffer, will hold the expanded command string
+		memset(newToken, '\0', new_length);   // zero newToken buffer so the buffer will always have a null terminator in the right spot
 
 		i = 0;
 		int j = 0;
 		int k;
+		// iterate through command string and copy each character to newToken, but replacing $$ with pid_str
 		while (i < token_length) {
 			if (token[i] == '$' && i != token_length - 1 && token[i + 1] == '$') {
 				i++;
@@ -84,7 +90,11 @@ char* expandDollars(char* token) {
 	return token;
 }
 
+
+// parses the input command string and fills a command structs members with information in the command string.
+// returns filled command struct
 struct command* parseCommand(char* commandString) {
+	// initialize command struct to be filled
 	struct command* currentCommand = malloc(sizeof(struct command));
 	currentCommand->foreground = malloc(sizeof(int));
 	*currentCommand->foreground = 1;
@@ -92,16 +102,16 @@ struct command* parseCommand(char* commandString) {
 	currentCommand->args = NULL;
 	currentCommand->inputFile = NULL;
 	currentCommand->outputFile = NULL;
-	char* save;
-	commandString = expandDollars(commandString);
+	char* save;	// for repeated strtok_r calls
+	commandString = expandDollars(commandString);    // expand input command string
 	int lastCharIdx = strlen(commandString) - 1;
 	char stringHolder[lastCharIdx + 5];
 	commandString[lastCharIdx] = '\0';
-	strcpy(stringHolder, commandString);
-	char* token = strtok_r(stringHolder, " ", &save);
-	int len;
-	int stopArgs = 0;
-	struct arg* prev;
+	strcpy(stringHolder, commandString);			// copy into stringholder so strtok_r works
+	char* token = strtok_r(stringHolder, " ", &save);  // start tokenizing expanded command string with space delimiter and interpreting the words
+	int len;	// holds length of specific tokens for mallocing command struct members
+	int stopArgs = 0;			// set to 1 when < or > is encountered (i.e., if we shouldnt be getting anymore arguments)
+	struct arg* prev;			// remembers previous argument inserted into argument LL
 	while (token != NULL) {
 		if (currentCommand->name == NULL) {         // first word will be command
 			len = strlen(token) + 1;
@@ -109,8 +119,8 @@ struct command* parseCommand(char* commandString) {
 			strncpy(currentCommand->name, token, len);
 		}
 		else if (!(strcmp(token, ">"))) {           // next word will be filename for output redirect
-			stopArgs = 1;
-			token = strtok_r(NULL, " ", &save);
+			stopArgs = 1;							// should get no more arguments after this
+			token = strtok_r(NULL, " ", &save);     // if command string ends with a > or < the command has invalid syntax, so flag it by setting foreground = 2 and return
 			if (token == NULL) {
 				*currentCommand->foreground = 2;
 				break;
@@ -120,8 +130,8 @@ struct command* parseCommand(char* commandString) {
 			strncpy(currentCommand->outputFile, token, len);
 		}
 		else if (!(strcmp(token, "<"))) {           // next word will be filename for input redirect
-			stopArgs = 1;
-			token = strtok_r(NULL, " ", &save);
+			stopArgs = 1;							// should get no more arguments after this
+			token = strtok_r(NULL, " ", &save);     // if command string ends with a > or < the command has invalid syntax, so flag it by setting foreground = 2 and return
 			if (token == NULL) {
 				*currentCommand->foreground = 2;
 				break;
@@ -133,15 +143,17 @@ struct command* parseCommand(char* commandString) {
 		else if (!(strcmp(token, "&"))) {           // should be last token
 			char* ampersand = token;
 			token = strtok_r(NULL, " ", &save);
-			if (token == NULL) {
-				*currentCommand->foreground = 0;
+			if (token == NULL) {					// if the ampersand was the last character,
+				*currentCommand->foreground = 0;	// current command should be run in the background so indicate in its foreground member and break
 				break;
 			}
 			else {
-				if (stopArgs) {
+				if (stopArgs) {					// if we shouldnt have gotten another character the & because > or < was encountered, flag invalid syntax
 					*currentCommand->foreground = 2;
 				}
-				if (currentCommand->args == NULL) {
+				if (currentCommand->args == NULL) {  // we strtok_r'd the word after & in command string ~10 lines above to check if & was the last word in the command string,
+													 // and since we know this isnt the first word and we havent seen < or > yet, the current token must be argument.
+													 // so add it to the args LL
 					currentCommand->args = malloc(sizeof(struct arg));
 					prev = currentCommand->args;
 				}
@@ -154,15 +166,15 @@ struct command* parseCommand(char* commandString) {
 				strncpy(prev->name, ampersand, len);
 				prev->next = NULL;
 			}
-			continue;
+			continue; // token already holds the next word in the command string after & at this point so restart the while loop 
 		}
 		else {										// if none of the above the token is an arg
-			if (stopArgs) {
+			if (stopArgs) {							// flag argument coming after < or >
 				*currentCommand->foreground = 2;
 			}
-			if (currentCommand->args == NULL) {
+			if (currentCommand->args == NULL) {    // initialize the args LL if it is empty and put the first arg in it
 				currentCommand->args = malloc(sizeof(struct arg));
-				prev = currentCommand->args;
+				prev = currentCommand->args;  // point prev to the most recently inserted arg in the LL
 			}
 			else {
 				prev->next = malloc(sizeof(struct arg));
@@ -180,6 +192,7 @@ struct command* parseCommand(char* commandString) {
 
 
 void viewCommand(struct command* command) {
+	// included for debugging purposes. prints out information in a filled command struct parsed with above function
 	printf("command name: %s\n", command->name);
 	fflush(stdout);
 	printf("foreground(1) or background(0): %d\n", *command->foreground);
@@ -201,6 +214,7 @@ void viewCommand(struct command* command) {
 }
 
 void cleanupCommand(struct command* currentCommand) {
+	// frees a filled command struct and all of its members
 	free(currentCommand->name);
 	free(currentCommand->inputFile);
 	free(currentCommand->outputFile);
